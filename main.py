@@ -1,106 +1,151 @@
 import os
 import streamlit as st
-
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.chains import RetrievalQA
-
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
-from langchain_huggingface import HuggingFaceEndpoint
 from langchain_groq import ChatGroq
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain 
 from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
+import re
 
-DB_FAISS_PATH="Vectorstore/dbfaiss"
+load_dotenv(find_dotenv())
+def clean_response(response_text):
+    """Remove thinking blocks and other unwanted patterns from the response"""
+    # Remove <think>...</think> blocks
+    cleaned = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Remove any remaining thinking patterns
+    cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Clean up extra whitespace
+    cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned.strip())
+    
+    return cleaned.strip()
+
+
+DB_FAISS_PATH = "Vectorstore/dbfaiss"
+
 @st.cache_resource
 def get_vectorstore():
-    embedding_model=HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
-    db=FAISS.load_local(DB_FAISS_PATH, embedding_model, allow_dangerous_deserialization=True)
+    embedding_model = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+    db = FAISS.load_local(DB_FAISS_PATH, embedding_model, allow_dangerous_deserialization=True)
     return db
 
+@st.cache_resource
+def get_llm():
+    return ChatGroq(
+        model="deepseek-r1-distill-llama-70b",
+        temperature=0.0,
+        groq_api_key=os.environ["API_KEY"]
+    )
+
 def set_custom_prompt():
-    template = """ You are MediBot, a helpful and cautious medical assistant. Based on the user's symptoms and the given context, provide possible diagnoses with estimated probabilities (only if context supports it). Do not guess. Always rely on the medical context provided.
+    template = """You are MediBot, a helpful, accurate, and cautious AI medical assistant.
 
-Be medically accurate. When done, remind the user to consult a licensed doctor.
+Your task is to analyze the user's question along with the given medical context and prior conversation. Provide **possible medical explanations or conditions** only when clearly supported by the context.
 
-Context:
+Always follow these principles:
+- ❌ Do **not guess or speculate**.
+- ✅ Only make inferences if the **context explicitly supports** it.
+- 🧠 Use **estimated probabilities** where medically appropriate.
+- 📚 Stick strictly to the medical information provided.
+- 👨‍⚕️ Always **remind the user to consult a licensed medical professional** at the end.
+
+---
+
+📄 **Medical Context**:
 {context}
 
-Chat history:
+💬 **Conversation History**:
 {chat_history}
 
-Question:
+❓ **User Question**:
 {question}
 
-Answer as MediBot, starting directly. Include a note: "This is not a medical diagnosis. Please consult a licensed physician."
 """
     return PromptTemplate(
         input_variables=["context", "question", "chat_history"],
         template=template
     )
 
-
-def load_llm():
-    llm=ChatGroq(
-                    model="meta-llama/llama-4-maverick-17b-128e-instruct",  # free, fast Groq-hosted model
-                    temperature=0.0,
-                    groq_api_key=os.environ["API_KEY"]
-                )
-    return llm
-def format_chat_history(history):
-    return "\n".join([f"User: {msg['user']}\nMediBot: {msg['bot']}" for msg in history])
-
+def initialize_qa_chain():
+    """Initialize the QA chain with persistent memory"""
+    try:
+        vectorstore = get_vectorstore()
+        llm = get_llm()
+        
+        # Initialize memory that persists across requests
+        if "memory" not in st.session_state:
+            st.session_state.memory = ConversationBufferMemory(
+                memory_key="chat_history", 
+                return_messages=True,
+                output_key="answer"
+            )
+        
+        qa_chain = ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=vectorstore.as_retriever(search_kwargs={'k': 3}),
+            memory=st.session_state.memory,
+            combine_docs_chain_kwargs={"prompt": set_custom_prompt()},
+            return_source_documents=True  # Optional: to see source documents
+        )
+        
+        return qa_chain
+    except Exception as e:
+        st.error(f"Failed to initialize QA chain: {str(e)}")
+        return None
+    
 
 def main():
-    st.title("Ask Chatbot!")
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
+    st.title("MediBot - Medical Assistant Chatbot")
+    
+    # Initialize messages for UI display
     if 'messages' not in st.session_state:
         st.session_state.messages = []
-
+    
+    # Initialize QA chain
+    qa_chain = initialize_qa_chain()
+    if qa_chain is None:
+        st.error("Failed to initialize the chatbot. Please check your configuration.")
+        return
+    
+    # Display chat history
     for message in st.session_state.messages:
-        st.chat_message(message['role']).markdown(message['content'])
-
-    prompt=st.chat_input("Pass your prompt here")
-
-    if prompt:
-        st.chat_message('user').markdown(prompt)
-        st.session_state.messages.append({'role':'user', 'content': prompt})
+        with st.chat_message(message['role']):
+            st.markdown(message['content'])
+    
+    # Chat input
+    if prompt := st.chat_input("Ask me about your medical concerns..."):
+        # Display user message
+        with st.chat_message('user'):
+            st.markdown(prompt)
+        st.session_state.messages.append({'role': 'user', 'content': prompt})
         
-        try: 
-            vectorstore=get_vectorstore()
-        
-            if vectorstore is None:
-                st.error("Failed to load the vector store")
+        # Generate response
+        try:
+            with st.chat_message('assistant'):
+                with st.spinner("Thinking..."):
+                    # The memory is automatically managed by the chain
+                    response = qa_chain.invoke({"question": prompt})
+                    raw_result = response["answer"]
+                    result = clean_response(raw_result)
+                    
+                    st.markdown(result)
+                    
+                    # Optionally display source documents
+                    if "source_documents" in response and response["source_documents"]:
+                        with st.expander("📚 Source Documents"):
+                            for i, doc in enumerate(response["source_documents"]):
+                                st.write(f"**Source {i+1}:**")
+                                st.write(doc.page_content[:500] + "...")
             
-            memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-            qa_chain = ConversationalRetrievalChain.from_llm(
-                    llm=load_llm(),
-                    retriever=vectorstore.as_retriever(search_kwargs={'k': 3}),
-                    memory=memory,
-                    combine_docs_chain_kwargs={"prompt": set_custom_prompt()}
-                )
-                # Format history for the prompt
-            formatted_history = format_chat_history(st.session_state.chat_history)
-            
-            response = qa_chain.invoke({
-                "question": prompt,
-                "chat_history": formatted_history
-            })
-
-            result=response["answer"]
-              # Save the turn in chat history and UI
-            st.chat_message('assistant').markdown(result)
+            # Save assistant message
             st.session_state.messages.append({'role': 'assistant', 'content': result})
-            st.session_state.chat_history.append({"user": prompt, "bot": result})
-
+            
         except Exception as e:
-            st.error(f"Error: {str(e)}")
+            st.error(f"Error generating response: {str(e)}")
+            # You might want to log this error for debugging
 
 if __name__ == "__main__":
     main()
