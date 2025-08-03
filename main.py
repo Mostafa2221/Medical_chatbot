@@ -24,7 +24,7 @@ def clean_response(response_text):
     return cleaned.strip()
 
 
-DB_FAISS_PATH = "Vectortore/dbfaiss"
+DB_FAISS_PATH = "Vectorstore/dbfaiss"
 
 @st.cache_resource
 def get_vectorstore():
@@ -150,3 +150,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
