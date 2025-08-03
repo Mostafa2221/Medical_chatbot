@@ -10,7 +10,7 @@ from dotenv import load_dotenv, find_dotenv
 import re
 load_dotenv(find_dotenv())
 
-"""Remove thinking blocks and other unwanted patterns from the response"""
+"""Remove thinking blocks and other unwanted patterns from the response because the model i am using requires it"""
 def clean_response(response_text):
     cleaned = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL | re.IGNORECASE)
     
@@ -71,12 +71,10 @@ RESPONSE STRUCTURE:
     )
 
 def initialize_qa_chain():
-    """Initialize the QA chain with persistent memory"""
     try:
         vectorstore = get_vectorstore()
         llm = get_llm()
         
-        # Initialize memory that persists across requests
         if "memory" not in st.session_state:
             st.session_state.memory = ConversationBufferMemory(
                 memory_key="chat_history", 
@@ -89,7 +87,7 @@ def initialize_qa_chain():
             retriever=vectorstore.as_retriever(search_kwargs={'k': 3}),
             memory=st.session_state.memory,
             combine_docs_chain_kwargs={"prompt": set_custom_prompt()},
-            return_source_documents=True  # Optional: to see source documents
+            return_source_documents=True 
         )
         
         return qa_chain
@@ -101,52 +99,43 @@ def initialize_qa_chain():
 def main():
     st.title("MediBot - Medical Assistant Chatbot")
     
-    # Initialize messages for UI display
     if 'messages' not in st.session_state:
         st.session_state.messages = []
     
-    # Initialize QA chain
     qa_chain = initialize_qa_chain()
     if qa_chain is None:
         st.error("Failed to initialize the chatbot. Please check your configuration.")
         return
     
-    # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message['role']):
             st.markdown(message['content'])
     
-    # Chat input
     if prompt := st.chat_input("Ask me about your medical concerns..."):
-        # Display user message
         with st.chat_message('user'):
             st.markdown(prompt)
         st.session_state.messages.append({'role': 'user', 'content': prompt})
         
-        # Generate response
         try:
             with st.chat_message('assistant'):
                 with st.spinner("Thinking..."):
-                    # The memory is automatically managed by the chain
+                    
                     response = qa_chain.invoke({"question": prompt})
                     raw_result = response["answer"]
                     result = clean_response(raw_result)
                     
                     st.markdown(result)
                     
-                    # Optionally display source documents
                     if "source_documents" in response and response["source_documents"]:
                         with st.expander("📚 Source Documents"):
                             for i, doc in enumerate(response["source_documents"]):
                                 st.write(f"**Source {i+1}:**")
                                 st.write(doc.page_content[:500] + "...")
             
-            # Save assistant message
             st.session_state.messages.append({'role': 'assistant', 'content': result})
             
         except Exception as e:
             st.error(f"Error generating response: {str(e)}")
-            # You might want to log this error for debugging
     col1, col2 = st.columns([3, 1])
     with col2:
         if st.button("🗑️ Clear Chat"):
@@ -158,4 +147,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
