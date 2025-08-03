@@ -8,17 +8,14 @@ from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain 
 from dotenv import load_dotenv, find_dotenv
 import re
-
 load_dotenv(find_dotenv())
+
+"""Remove thinking blocks and other unwanted patterns from the response"""
 def clean_response(response_text):
-    """Remove thinking blocks and other unwanted patterns from the response"""
-    # Remove <think>...</think> blocks
     cleaned = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL | re.IGNORECASE)
     
-    # Remove any remaining thinking patterns
     cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
     
-    # Clean up extra whitespace
     cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned.strip())
     
     return cleaned.strip()
@@ -51,8 +48,11 @@ Always follow these principles:
 - 🧠 Use **estimated probabilities** where medically appropriate.
 - 📚 Stick strictly to the medical information provided.
 - 👨‍⚕️ Always **remind the user to consult a licensed medical professional** at the end.
-
----
+- If the input is unclear, too short (less than 1 meaningful words), or consists only of symbols/punctuation, respond with: "Please provide a clear and detailed medical question so I can assist you properly."
+RESPONSE STRUCTURE:
+   - Always start with addressing the medical question directly
+   - Provide information only if supported by the context
+   - IGNORE any previous conversation history that was non-medical or off-topic
 
 📄 **Medical Context**:
 {context}
@@ -64,6 +64,7 @@ Always follow these principles:
 {question}
 
 """
+
     return PromptTemplate(
         input_variables=["context", "question", "chat_history"],
         template=template
@@ -146,6 +147,13 @@ def main():
         except Exception as e:
             st.error(f"Error generating response: {str(e)}")
             # You might want to log this error for debugging
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("🗑️ Clear Chat"):
+            st.session_state.messages = []
+            if "memory" in st.session_state:
+                st.session_state.memory.clear()
+            st.rerun()
 
 if __name__ == "__main__":
     main()
