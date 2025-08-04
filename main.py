@@ -43,24 +43,24 @@ def set_custom_prompt():
 Your task is to analyze the user's question along with the given medical context and prior conversation. Provide **possible medical explanations or conditions** only when clearly supported by the context.
 
 Always follow these principles:
-- ❌ Do **not guess or speculate**.
-- ✅ Only make inferences if the **context explicitly supports** it.
-- 🧠 Use **estimated probabilities** where medically appropriate.
-- 📚 Stick strictly to the medical information provided.
-- 👨‍⚕️ Always **remind the user to consult a licensed medical professional** at the end.
+- Do not guess or speculate.
+-  Only make inferences if the context explicitly supports it.
+-  Use estimated probabilities where medically appropriate.
+-  Stick strictly to the medical information provided.
+-  Always remind the user to consult a licensed medical professional at the end.
 - If the input is unclear, too short (less than 1 meaningful words), or consists only of symbols/punctuation, respond with: "Please provide a clear and detailed medical question so I can assist you properly."
 RESPONSE STRUCTURE:
    - Always start with addressing the medical question directly
    - Provide information only if supported by the context
    - IGNORE any previous conversation history that was non-medical or off-topic
 
-📄 **Medical Context**:
+Medical Context:
 {context}
 
-💬 **Conversation History**:
+Conversation History:
 {chat_history}
 
-❓ **User Question**:
+User Question:
 {question}
 
 """
@@ -147,5 +147,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
